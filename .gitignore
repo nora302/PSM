@@ -1,0 +1,83 @@
+# =========================
+# PSM - Pflege Management System
+# =========================
+
+
+# =========================
+# Visual Studio / .NET
+# =========================
+.vs/
+bin/
+obj/
+*.user
+*.suo
+
+
+# =========================
+# ASP.NET Core - Local config / secrets
+# =========================
+
+# Contains local PostgreSQL credentials - DO NOT COMMIT
+src/PSM.Api/appsettings.json
+
+# Local development configuration
+appsettings.Development.json
+appsettings.Local.json
+
+# Environment / secrets
+.env
+.env.*
+*.env
+
+
+# =========================
+# Flutter / Dart
+# =========================
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+.pub-cache/
+.pub/
+coverage/
+
+
+# =========================
+# Android
+# =========================
+**/android/.gradle/
+**/android/local.properties
+
+
+# =========================
+# Android Studio / IntelliJ
+# =========================
+.idea/
+*.iml
+
+
+# =========================
+# VS Code
+# =========================
+.vscode/
+
+
+# =========================
+# Logs
+# =========================
+*.log
+
+
+# =========================
+# Generated PSM reports
+# =========================
+Pflegebericht_*.pdf
+
+
+# =========================
+# Operating System files
+# =========================
+.DS_Store
+Thumbs.db*.backup.txt
+src/PSM.Api/Controllers/PflegedokumentationController.backup.txt
