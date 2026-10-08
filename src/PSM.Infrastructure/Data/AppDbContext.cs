@@ -15,30 +15,6 @@ public class AppDbContext : IdentityDbContext<Benutzer>
     public DbSet<Bewohner> Bewohner =>
         Set<Bewohner>();
 
-    public DbSet<Standort> Standorte =>
-        Set<Standort>();
-
-    public DbSet<Pflegedokumentation> Pflegedokumentationen =>
-        Set<Pflegedokumentation>();
-
-    public DbSet<Ernaehrung> Ernaehrungen =>
-        Set<Ernaehrung>();
-
-    public DbSet<Allergie> Allergien =>
-        Set<Allergie>();
-
-    public DbSet<Lebensmittelbestellung> Lebensmittelbestellungen =>
-        Set<Lebensmittelbestellung>();
-
-    public DbSet<Bestellposition> Bestellpositionen =>
-        Set<Bestellposition>();
-
-    public DbSet<Essensausgabe> Essensausgaben =>
-        Set<Essensausgabe>();
-
-    public DbSet<BewohnerStandortHistorie> BewohnerStandortHistorien =>
-        Set<BewohnerStandortHistorie>();
-
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
