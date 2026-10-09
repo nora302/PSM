@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using PSM.Infrastructure.Data;
@@ -11,9 +12,11 @@ using PSM.Infrastructure.Data;
 namespace PSM.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260827090540_AjoutGelieferteMenge")]
+    partial class AjoutGelieferteMenge
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -188,48 +191,6 @@ namespace PSM.Infrastructure.Data.Migrations
                     b.ToTable("Allergien");
                 });
 
-            modelBuilder.Entity("PSM.Domain.Entities.Benachrichtigung", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("BewohnerId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("EmpfaengerRolle")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<DateTime>("ErstelltAm")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("Gelesen")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Nachricht")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<int>("StandortId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Typ")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("StandortId");
-
-                    b.HasIndex("EmpfaengerRolle", "Gelesen");
-
-                    b.ToTable("Benachrichtigungen");
-                });
-
             modelBuilder.Entity("PSM.Domain.Entities.Bestellposition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -275,17 +236,11 @@ namespace PSM.Infrastructure.Data.Migrations
                     b.Property<DateTime>("ErstelltAm")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<int>("Etage")
-                        .HasColumnType("integer");
-
                     b.Property<DateTime?>("GeaendertAm")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateOnly>("Geburtsdatum")
                         .HasColumnType("date");
-
-                    b.Property<bool>("IstArchiviert")
-                        .HasColumnType("boolean");
 
                     b.Property<string>("Nachname")
                         .IsRequired()
@@ -396,11 +351,6 @@ namespace PSM.Infrastructure.Data.Migrations
                     b.Property<string>("Kostform")
                         .IsRequired()
                         .HasColumnType("text");
-
-                    b.Property<string>("Krankheit")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
 
                     b.Property<string>("Mittagessen")
                         .IsRequired()
@@ -780,17 +730,6 @@ namespace PSM.Infrastructure.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Bewohner");
-                });
-
-            modelBuilder.Entity("PSM.Domain.Entities.Benachrichtigung", b =>
-                {
-                    b.HasOne("PSM.Domain.Entities.Standort", "Standort")
-                        .WithMany()
-                        .HasForeignKey("StandortId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Standort");
                 });
 
             modelBuilder.Entity("PSM.Domain.Entities.Bestellposition", b =>

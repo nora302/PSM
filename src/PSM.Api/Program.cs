@@ -5,19 +5,45 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using PdfSharp.Fonts;
-using PSM.Application.Interfaces;
 using PSM.Infrastructure.Data;
 using PSM.Infrastructure.Identity;
-using PSM.Infrastructure.SpeechToText;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// --------------------------------------------------
+// CORS
+// --------------------------------------------------
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("PsmCorsPolicy", policy =>
+    {
+        if (builder.Environment.IsDevelopment())
+        {
+            // Nur f�r lokale Entwicklung: jeder localhost-Port erlaubt.
+            policy.SetIsOriginAllowed(origin =>
+                    new Uri(origin).Host == "localhost")
+                  .AllowAnyHeader()
+                  .AllowAnyMethod();
+        }
+        else
+        {
+            // Produktion: nur explizit erlaubte Domains.
+            var erlaubteOrigins = builder.Configuration
+                .GetSection("AllowedOrigins")
+                .Get<string[]>() ?? Array.Empty<string>();
+
+            policy.WithOrigins(erlaubteOrigins)
+                  .AllowAnyHeader()
+                  .AllowAnyMethod();
+        }
+    });
+});
 
 // --------------------------------------------------
 // PDFsharp / MigraDoc Fonts
 // --------------------------------------------------
 
-// Für lokale Entwicklung unter Windows.
-// PDFsharp 6.2 benötigt einen expliziten Font Resolver.
 GlobalFontSettings.UseWindowsFontsUnderWindows = true;
 
 // --------------------------------------------------
@@ -39,7 +65,6 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services
     .AddIdentity<Benutzer, IdentityRole>(options =>
     {
-        // Nur für lokale Tests
         options.Password.RequiredLength = 4;
         options.Password.RequireDigit = true;
         options.Password.RequireUppercase = false;
@@ -92,14 +117,6 @@ builder.Services
 // --------------------------------------------------
 
 builder.Services.AddAuthorization();
-
-// --------------------------------------------------
-// Azure Speech-to-Text
-// --------------------------------------------------
-
-builder.Services.AddScoped<
-    ISpeechToTextService,
-    AzureSpeechToTextService>();
 
 // --------------------------------------------------
 // Controller
@@ -185,21 +202,19 @@ using (var scope = app.Services.CreateScope())
         }
     }
 
-    // Nur für lokale Entwicklung / Tests
-    const string adminBenutzername = "H.Aidouni";
+    const string adminBenutzername = "admin";
     const string adminPasswort = "1234";
 
     var admin =
-        await userManager.FindByNameAsync(
-            adminBenutzername);
+        await userManager.FindByNameAsync(adminBenutzername);
 
     if (admin == null)
     {
         admin = new Benutzer
         {
             UserName = adminBenutzername,
-            Vorname = "H.",
-            Nachname = "Aidouni",
+            Vorname = "Admin",
+            Nachname = "System",
             StandortId = null,
             IstAktiv = true
         };
@@ -240,12 +255,14 @@ if (app.Environment.IsDevelopment())
 // HTTP Pipeline
 // --------------------------------------------------
 
-// Für lokale HTTP-Entwicklung vorerst deaktiviert.
-// In Produktion wieder HTTPS aktivieren.
-// app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
+
+app.UseCors("PsmCorsPolicy");
 
 app.UseAuthentication();
-
 app.UseAuthorization();
 
 app.MapControllers();

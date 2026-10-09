@@ -1,5 +1,3 @@
-using MigraDoc.DocumentObjectModel;
-using MigraDoc.Rendering;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -11,7 +9,7 @@ using System.Security.Claims;
 namespace PSM.Api.Controllers;
 
 [ApiController]
-[Route("api/pflegedokumentationen")]
+[Route("api/pflegedokumentation")]
 [Authorize]
 public class PflegedokumentationController : ControllerBase
 {
@@ -23,127 +21,352 @@ public class PflegedokumentationController : ControllerBase
     }
 
     // --------------------------------------------------
-    // Alle Dokumentationen eines Bewohners
+    // ARCHIV / SUCHE
+    //
+    // Beispiele:
+    //
+    // GET /api/pflegedokumentation/archiv
+    //
+    // GET /api/pflegedokumentation/archiv
+    //     ?bewohnerName=bab
+    //
+    // GET /api/pflegedokumentation/archiv
+    //     ?datum=2026-09-09
+    //
+    // GET /api/pflegedokumentation/archiv
+    //     ?bewohnerName=bab&datum=2026-09-09
     // --------------------------------------------------
 
-    [HttpGet("bewohner/{bewohnerId:guid}")]
-    public async Task<IActionResult> AlleVonBewohner(Guid bewohnerId)
+    [HttpGet("archiv")]
+    [Authorize(Roles = "Pflegekraft,Administrator")]
+    public async Task<IActionResult> Archiv(
+        [FromQuery] string? bewohnerName,
+        [FromQuery] DateOnly? datum)
     {
-        var bewohner = await _context.Bewohner
-            .FirstOrDefaultAsync(b => b.Id == bewohnerId);
+        var rolle = User.FindFirstValue(ClaimTypes.Role);
 
-        if (bewohner == null)
+        var benutzerId =
+            User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (string.IsNullOrWhiteSpace(benutzerId))
         {
-            return NotFound(new
-            {
-                message = "Bewohner wurde nicht gefunden."
-            });
+            return Unauthorized();
         }
 
-        var zugriff = await DarfBewohnerSehen(bewohner);
+        var aktuellerBenutzer = await _context.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == benutzerId);
 
-        if (!zugriff)
+        if (aktuellerBenutzer == null)
+        {
+            return Unauthorized();
+        }
+
+        // Pflegekraft benötigt einen Standort.
+        if (rolle != "Administrator" &&
+            aktuellerBenutzer.StandortId == null)
         {
             return Forbid();
         }
 
-        var dokumentationen =
-            await _context.Pflegedokumentationen
-                .Where(p => p.BewohnerId == bewohnerId)
-                .OrderByDescending(p => p.Datum)
-                .ThenBy(p => p.Schicht)
-                .ToListAsync();
+        var query = _context.Pflegedokumentationen
+            .AsNoTracking()
+            .Include(p => p.Bewohner)
+            .AsQueryable();
 
-        return Ok(dokumentationen);
+        // --------------------------------------------------
+        // Standort-Schutz
+        // Administrator = alle Standorte
+        // Pflegekraft   = nur eigener Standort
+        // --------------------------------------------------
+
+        if (rolle != "Administrator")
+        {
+            query = query.Where(
+                p => p.Bewohner.StandortId ==
+                     aktuellerBenutzer.StandortId);
+        }
+
+        // --------------------------------------------------
+        // Bewohner-Name filtern
+        // Suche funktioniert mit Vorname oder Nachname.
+        //
+        // Beispiele:
+        // bab
+        // Meier
+        // bab bab
+        // --------------------------------------------------
+
+        if (!string.IsNullOrWhiteSpace(bewohnerName))
+        {
+            var suchText =
+                bewohnerName.Trim().ToLower();
+
+            query = query.Where(p =>
+                p.Bewohner.Vorname.ToLower()
+                    .Contains(suchText) ||
+
+                p.Bewohner.Nachname.ToLower()
+                    .Contains(suchText) ||
+
+                (p.Bewohner.Vorname + " " +
+                 p.Bewohner.Nachname)
+                    .ToLower()
+                    .Contains(suchText));
+        }
+
+        // --------------------------------------------------
+        // Datum filtern
+        // --------------------------------------------------
+
+        if (datum.HasValue)
+        {
+            query = query.Where(
+                p => p.Datum == datum.Value);
+        }
+
+        // --------------------------------------------------
+        // Dokumentationen laden
+        // --------------------------------------------------
+
+        var dokumentationen = await query
+            .OrderByDescending(p => p.Datum)
+            .ThenBy(p => p.Bewohner.Nachname)
+            .ThenBy(p => p.Bewohner.Vorname)
+            .ThenBy(p => p.Schicht)
+            .ToListAsync();
+
+        // --------------------------------------------------
+        // Benutzer laden, damit wir Autoren anzeigen können
+        // --------------------------------------------------
+
+        var benutzerIds = dokumentationen
+            .SelectMany(p => new[]
+            {
+                p.ErstelltVonBenutzerId,
+                p.GeaendertVonBenutzerId
+            })
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct()
+            .ToList();
+
+        var benutzerListe = await _context.Users
+            .AsNoTracking()
+            .Where(u => benutzerIds.Contains(u.Id))
+            .Select(u => new
+            {
+                u.Id,
+                u.Vorname,
+                u.Nachname
+            })
+            .ToListAsync();
+
+        var benutzerNamen =
+            benutzerListe.ToDictionary(
+                u => u.Id,
+                u => $"{u.Vorname} {u.Nachname}".Trim());
+
+        string BenutzerNameOderUnbekannt(string? id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                return "-";
+            }
+
+            return benutzerNamen.TryGetValue(
+                id,
+                out var name)
+                ? name
+                : "-";
+        }
+
+        // --------------------------------------------------
+        // Ein Tagesbericht =
+        // 1 Bewohner + 1 Datum
+        //
+        // Darunter:
+        // Frühschicht
+        // Spätdienst
+        // Nachtschicht
+        // --------------------------------------------------
+
+        var ergebnisse = dokumentationen
+            .GroupBy(p => new
+            {
+                p.BewohnerId,
+                p.Datum
+            })
+            .Select(gruppe =>
+            {
+                var ersteDokumentation =
+                    gruppe.First();
+
+                var bewohner =
+                    ersteDokumentation.Bewohner;
+
+                return new
+                {
+                    bewohnerId = bewohner.Id,
+
+                    bewohnerName =
+                        $"{bewohner.Vorname} " +
+                        $"{bewohner.Nachname}",
+
+                    vorname = bewohner.Vorname,
+                    nachname = bewohner.Nachname,
+
+                    geburtsdatum =
+                        bewohner.Geburtsdatum,
+
+                    zimmernummer =
+                        bewohner.Zimmernummer,
+
+                    etage =
+                        bewohner.Etage,
+
+                    standortId =
+                        bewohner.StandortId,
+
+                    standortBewohnerNummer =
+                        bewohner.StandortBewohnerNummer,
+
+                    bewohnerIstArchiviert =
+                        bewohner.IstArchiviert,
+
+                    datum =
+                        gruppe.Key.Datum,
+
+                    dokumentationen = gruppe
+                        .OrderBy(p => p.Schicht)
+                        .Select(p => new
+                        {
+                            id = p.Id,
+
+                            schicht = p.Schicht,
+
+                            schichtName =
+                                SchichtName(p.Schicht),
+
+                            inhalt = p.Inhalt,
+
+                            mitSpracheErstellt =
+                                p.MitSpracheErstellt,
+
+                            erstelltAm =
+                                p.ErstelltAm,
+
+                            erstelltVonBenutzerId =
+                                p.ErstelltVonBenutzerId,
+
+                            erstelltVon =
+                                BenutzerNameOderUnbekannt(
+                                    p.ErstelltVonBenutzerId),
+
+                            geaendertAm =
+                                p.GeaendertAm,
+
+                            geaendertVonBenutzerId =
+                                p.GeaendertVonBenutzerId,
+
+                            geaendertVon =
+                                BenutzerNameOderUnbekannt(
+                                    p.GeaendertVonBenutzerId)
+                        })
+                        .ToList()
+                };
+            })
+            .OrderByDescending(x => x.datum)
+            .ThenBy(x => x.nachname)
+            .ThenBy(x => x.vorname)
+            .ToList();
+
+        return Ok(ergebnisse);
     }
 
     // --------------------------------------------------
-    // Tagesbericht eines Bewohners lesen
-    // Beispiel:
-    // GET /api/pflegedokumentationen/
-    // bewohner/{id}/tagesbericht?datum=2026-08-16
+    // Alle Dokumentationen eines Bewohners an einem Datum
+    // (Grundlage für den Tagesbericht)
     // --------------------------------------------------
 
-    [HttpGet("bewohner/{bewohnerId:guid}/tagesbericht")]
-    public async Task<IActionResult> Tagesbericht(
+    [HttpGet("bewohner/{bewohnerId:guid}/datum/{datum}")]
+    public async Task<IActionResult> NachBewohnerUndDatum(
         Guid bewohnerId,
-        [FromQuery] DateOnly datum)
+        DateOnly datum)
     {
         var bewohner = await _context.Bewohner
-            .Include(b => b.Standort)
-            .FirstOrDefaultAsync(b => b.Id == bewohnerId);
+            .FirstOrDefaultAsync(
+                b => b.Id == bewohnerId);
 
         if (bewohner == null)
         {
             return NotFound(new
             {
-                message = "Bewohner wurde nicht gefunden."
+                message =
+                    "Bewohner wurde nicht gefunden."
             });
         }
 
-        var zugriff = await DarfBewohnerSehen(bewohner);
+        var zugriffsFehler =
+            await ZugriffPruefen(
+                bewohner.StandortId);
 
-        if (!zugriff)
+        if (zugriffsFehler != null)
         {
-            return Forbid();
+            return zugriffsFehler;
         }
 
         var dokumentationen =
-            await _context.Pflegedokumentationen
+            await _context
+                .Pflegedokumentationen
                 .Where(p =>
                     p.BewohnerId == bewohnerId &&
                     p.Datum == datum)
                 .OrderBy(p => p.Schicht)
                 .ToListAsync();
 
-        var result = new List<object>();
-
-        foreach (var dokumentation in dokumentationen)
-        {
-            var pflegekraft = await _context.Users
-                .FirstOrDefaultAsync(
-                    u => u.Id ==
-                        dokumentation.ErstelltVonBenutzerId);
-
-            result.Add(new
-            {
-                dokumentation.Id,
-                dokumentation.BewohnerId,
-                dokumentation.Datum,
-                dokumentation.Schicht,
-                SchichtName = SchichtName(dokumentation.Schicht),
-                dokumentation.Inhalt,
-                dokumentation.ErstelltAm,
-                dokumentation.GeaendertAm,
-
-                Pflegefachkraft = pflegekraft == null
-                    ? dokumentation.ErstelltVonBenutzerId
-                    : $"{pflegekraft.Vorname} {pflegekraft.Nachname}"
-            });
-        }
-
-        return Ok(new
-        {
-            bewohner = new
-            {
-                bewohner.Id,
-                bewohner.Vorname,
-                bewohner.Nachname,
-                bewohner.Geburtsdatum,
-                bewohner.Zimmernummer,
-                bewohner.StandortBewohnerNummer,
-                Standort = bewohner.Standort.Name
-            },
-
-            datum,
-
-            dokumentationen = result
-        });
+        return Ok(dokumentationen);
     }
 
     // --------------------------------------------------
-    // Dokumentation erstellen
-    // Nur Pflegekraft
+    // Einzelne Dokumentation
+    // --------------------------------------------------
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> NachId(
+        Guid id)
+    {
+        var dokumentation =
+            await _context
+                .Pflegedokumentationen
+                .Include(p => p.Bewohner)
+                .FirstOrDefaultAsync(
+                    p => p.Id == id);
+
+        if (dokumentation == null)
+        {
+            return NotFound(new
+            {
+                message =
+                    "Pflegedokumentation wurde nicht gefunden."
+            });
+        }
+
+        var zugriffsFehler =
+            await ZugriffPruefen(
+                dokumentation
+                    .Bewohner
+                    .StandortId);
+
+        if (zugriffsFehler != null)
+        {
+            return zugriffsFehler;
+        }
+
+        return Ok(dokumentation);
+    }
+
+    // --------------------------------------------------
+    // Erstellen
     // --------------------------------------------------
 
     [HttpPost]
@@ -152,137 +375,147 @@ public class PflegedokumentationController : ControllerBase
         PflegedokumentationErstellenRequest request)
     {
         var benutzerId =
-            User.FindFirstValue(ClaimTypes.NameIdentifier);
+            User.FindFirstValue(
+                ClaimTypes.NameIdentifier);
 
-        var benutzer = await _context.Users
-            .FirstOrDefaultAsync(u => u.Id == benutzerId);
+        var benutzer =
+            await _context.Users
+                .FirstOrDefaultAsync(
+                    u => u.Id == benutzerId);
 
         if (benutzer == null)
         {
             return Unauthorized();
         }
 
-        if (!benutzer.IstAktiv)
-        {
-            return Unauthorized(new
-            {
-                message = "Benutzer ist nicht aktiv."
-            });
-        }
-
-        var bewohner = await _context.Bewohner
-            .FirstOrDefaultAsync(
-                b => b.Id == request.BewohnerId);
+        var bewohner =
+            await _context.Bewohner
+                .FirstOrDefaultAsync(
+                    b => b.Id ==
+                         request.BewohnerId);
 
         if (bewohner == null)
         {
             return NotFound(new
             {
-                message = "Bewohner wurde nicht gefunden."
+                message =
+                    "Bewohner wurde nicht gefunden."
             });
         }
 
-        if (benutzer.StandortId != bewohner.StandortId)
+        if (benutzer.StandortId !=
+            bewohner.StandortId)
         {
             return Forbid();
         }
 
-        if (request.Datum == default)
-        {
-            return BadRequest(new
-            {
-                message = "Ein gültiges Datum muss angegeben werden."
-            });
-        }
-
-        if (!Enum.IsDefined(typeof(PflegeSchicht), request.Schicht))
-        {
-            return BadRequest(new
-            {
-                message = "Ungültige Schicht."
-            });
-        }
-
-        if (string.IsNullOrWhiteSpace(request.Inhalt))
-        {
-            return BadRequest(new
-            {
-                message = "Der Bericht darf nicht leer sein."
-            });
-        }
-
-        // --------------------------------------------------
-        // Nur eine Dokumentation:
-        // Bewohner + Datum + Schicht
-        // --------------------------------------------------
-
-        var existiert =
-            await _context.Pflegedokumentationen
-                .AnyAsync(p =>
-                    p.BewohnerId == request.BewohnerId &&
-                    p.Datum == request.Datum &&
-                    p.Schicht == request.Schicht);
-
-        if (existiert)
+        if (!Enum.IsDefined(
+                typeof(PflegeSchicht),
+                request.Schicht))
         {
             return BadRequest(new
             {
                 message =
-                    $"Für {SchichtName(request.Schicht)} " +
-                    $"am {request.Datum:dd.MM.yyyy} " +
-                    "existiert bereits eine Dokumentation."
+                    "Die angegebene Schicht ist ungültig."
             });
         }
 
-        var dokumentation = new Pflegedokumentation
+        if (string.IsNullOrWhiteSpace(
+                request.Inhalt))
         {
-            Id = Guid.NewGuid(),
+            return BadRequest(new
+            {
+                message =
+                    "Der Pflegebericht darf nicht leer sein."
+            });
+        }
 
-            BewohnerId = request.BewohnerId,
+        // --------------------------------------------------
+        // Geschäftsregel:
+        //
+        // 1 Bewohner
+        // + 1 Datum
+        // + 1 Schicht
+        // = maximal 1 Dokumentation
+        // --------------------------------------------------
 
-            Datum = request.Datum,
+        var existiertBereits =
+            await _context
+                .Pflegedokumentationen
+                .AnyAsync(p =>
+                    p.BewohnerId ==
+                        request.BewohnerId &&
+                    p.Datum ==
+                        request.Datum &&
+                    p.Schicht ==
+                        request.Schicht);
 
-            Schicht = request.Schicht,
-
-            Inhalt = request.Inhalt.Trim(),
-
-            ErstelltAm = DateTime.UtcNow,
-
-            ErstelltVonBenutzerId = benutzer.Id,
-
-            MitSpracheErstellt =
-                request.MitSpracheErstellt
-        };
-
-        _context.Pflegedokumentationen.Add(
-            dokumentation);
-
-        await _context.SaveChangesAsync();
-
-        return Ok(new
+        if (existiertBereits)
         {
-            message =
-                "Pflegedokumentation wurde gespeichert.",
+            return BadRequest(new
+            {
+                message =
+                    "Für diesen Bewohner, dieses Datum " +
+                    "und diese Schicht existiert bereits " +
+                    "eine Pflegedokumentation."
+            });
+        }
 
-            dokumentation.Id,
-            dokumentation.BewohnerId,
-            dokumentation.Datum,
-            dokumentation.Schicht,
+        var dokumentation =
+            new Pflegedokumentation
+            {
+                Id = Guid.NewGuid(),
 
-            SchichtName =
-                SchichtName(dokumentation.Schicht),
+                BewohnerId =
+                    request.BewohnerId,
 
-            dokumentation.Inhalt,
-            dokumentation.ErstelltAm,
+                Datum =
+                    request.Datum,
 
-            Pflegefachkraft =
-                $"{benutzer.Vorname} {benutzer.Nachname}"
-        });
+                Schicht =
+                    request.Schicht,
+
+                Inhalt =
+                    request.Inhalt,
+
+                MitSpracheErstellt =
+                    request.MitSpracheErstellt,
+
+                ErstelltAm =
+                    DateTime.UtcNow,
+
+                ErstelltVonBenutzerId =
+                    benutzer.Id
+            };
+
+        _context
+            .Pflegedokumentationen
+            .Add(dokumentation);
+
+        try
+        {
+            await _context
+                .SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            return BadRequest(new
+            {
+                message =
+                    "Für diesen Bewohner, dieses Datum " +
+                    "und diese Schicht existiert bereits " +
+                    "eine Pflegedokumentation."
+            });
+        }
+
+        return Ok(dokumentation);
     }
 
     // --------------------------------------------------
-    // Bericht korrigieren
-    // Datum und Schicht werden NICHT verändert.
+    // Korrigieren
+    //
+    // Nur Inhalt.
+    // Bewohner, Datum und Schicht bleiben unverändert.
     // --------------------------------------------------
 
     [HttpPut("{id:guid}")]
@@ -292,10 +525,13 @@ public class PflegedokumentationController : ControllerBase
         PflegedokumentationBearbeitenRequest request)
     {
         var benutzerId =
-            User.FindFirstValue(ClaimTypes.NameIdentifier);
+            User.FindFirstValue(
+                ClaimTypes.NameIdentifier);
 
-        var benutzer = await _context.Users
-            .FirstOrDefaultAsync(u => u.Id == benutzerId);
+        var benutzer =
+            await _context.Users
+                .FirstOrDefaultAsync(
+                    u => u.Id == benutzerId);
 
         if (benutzer == null)
         {
@@ -303,9 +539,11 @@ public class PflegedokumentationController : ControllerBase
         }
 
         var dokumentation =
-            await _context.Pflegedokumentationen
+            await _context
+                .Pflegedokumentationen
                 .Include(p => p.Bewohner)
-                .FirstOrDefaultAsync(p => p.Id == id);
+                .FirstOrDefaultAsync(
+                    p => p.Id == id);
 
         if (dokumentation == null)
         {
@@ -317,21 +555,26 @@ public class PflegedokumentationController : ControllerBase
         }
 
         if (benutzer.StandortId !=
-            dokumentation.Bewohner.StandortId)
+            dokumentation
+                .Bewohner
+                .StandortId)
         {
             return Forbid();
         }
 
-        if (string.IsNullOrWhiteSpace(request.Inhalt))
+        if (string.IsNullOrWhiteSpace(
+                request.Inhalt))
         {
             return BadRequest(new
             {
-                message = "Der Bericht darf nicht leer sein."
+                message =
+                    "Der Pflegebericht darf nicht leer sein."
             });
         }
 
+        // Keine automatische KI-Umschreibung.
         dokumentation.Inhalt =
-            request.Inhalt.Trim();
+            request.Inhalt;
 
         dokumentation.MitSpracheErstellt =
             request.MitSpracheErstellt;
@@ -344,385 +587,11 @@ public class PflegedokumentationController : ControllerBase
 
         await _context.SaveChangesAsync();
 
-        return Ok(new
-        {
-            message =
-                "Pflegedokumentation wurde aktualisiert.",
-
-            dokumentation.Id,
-            dokumentation.Datum,
-            dokumentation.Schicht,
-
-            SchichtName =
-                SchichtName(dokumentation.Schicht),
-
-            dokumentation.Inhalt,
-            dokumentation.GeaendertAm
-        });
+        return Ok(dokumentation);
     }
 
     // --------------------------------------------------
-    // EIN PDF für Bewohner + Datum
-    //
-    // GET:
-    // /api/pflegedokumentationen/
-    // bewohner/{bewohnerId}/tagesbericht/pdf
-    // ?datum=2026-08-16
-    // --------------------------------------------------
-
-    [HttpGet("bewohner/{bewohnerId:guid}/tagesbericht/pdf")]
-    public async Task<IActionResult> TagesberichtPdf(
-        Guid bewohnerId,
-        [FromQuery] DateOnly datum)
-    {
-        var bewohner = await _context.Bewohner
-            .Include(b => b.Standort)
-            .FirstOrDefaultAsync(
-                b => b.Id == bewohnerId);
-
-        if (bewohner == null)
-        {
-            return NotFound(new
-            {
-                message = "Bewohner wurde nicht gefunden."
-            });
-        }
-
-        var zugriff = await DarfBewohnerSehen(bewohner);
-
-        if (!zugriff)
-        {
-            return Forbid();
-        }
-
-        var dokumentationen =
-            await _context.Pflegedokumentationen
-                .Where(p =>
-                    p.BewohnerId == bewohnerId &&
-                    p.Datum == datum)
-                .OrderBy(p => p.Schicht)
-                .ToListAsync();
-
-        if (!dokumentationen.Any())
-        {
-            return NotFound(new
-            {
-                message =
-                    $"Für den {datum:dd.MM.yyyy} " +
-                    "existiert kein Pflegebericht."
-            });
-        }
-
-        var frueh =
-            dokumentationen.FirstOrDefault(
-                p => p.Schicht ==
-                    PflegeSchicht.Fruehschicht);
-
-        var spaet =
-            dokumentationen.FirstOrDefault(
-                p => p.Schicht ==
-                    PflegeSchicht.Spaetdienst);
-
-        var nacht =
-            dokumentationen.FirstOrDefault(
-                p => p.Schicht ==
-                    PflegeSchicht.Nachtschicht);
-
-        // --------------------------------------------------
-        // PDF erstellen
-        // --------------------------------------------------
-
-        var document = new Document();
-
-        document.Info.Title =
-            $"PSM Pflegebericht {datum:dd.MM.yyyy}";
-
-        var section =
-            document.AddSection();
-
-        section.PageSetup.TopMargin =
-            Unit.FromCentimeter(1.8);
-
-        section.PageSetup.BottomMargin =
-            Unit.FromCentimeter(1.8);
-
-        section.PageSetup.LeftMargin =
-            Unit.FromCentimeter(2);
-
-        section.PageSetup.RightMargin =
-            Unit.FromCentimeter(2);
-
-        // --------------------------------------------------
-        // Titel
-        // --------------------------------------------------
-
-        var titel =
-            section.AddParagraph();
-
-        titel.AddFormattedText(
-            "PSM - Pflegebericht",
-            TextFormat.Bold);
-
-        titel.Format.Font.Size = 18;
-
-        titel.Format.SpaceAfter =
-            Unit.FromCentimeter(0.6);
-
-        // --------------------------------------------------
-        // Bewohnerdaten
-        // --------------------------------------------------
-
-        AddZeile(
-            section,
-            "Bewohner:",
-            $"{bewohner.Vorname} {bewohner.Nachname}");
-
-        AddZeile(
-            section,
-            "Geburtsdatum:",
-            bewohner.Geburtsdatum
-                .ToString("dd.MM.yyyy"));
-
-        AddZeile(
-            section,
-            "Standort:",
-            bewohner.Standort.Name);
-
-        AddZeile(
-            section,
-            "Zimmer:",
-            bewohner.Zimmernummer);
-
-        AddZeile(
-            section,
-            "Bewohnernummer:",
-            bewohner.StandortBewohnerNummer
-                .ToString());
-
-        AddZeile(
-            section,
-            "Berichtsdatum:",
-            datum.ToString("dd.MM.yyyy"));
-
-        section.AddParagraph();
-
-        // --------------------------------------------------
-        // Frühschicht
-        // --------------------------------------------------
-
-        await AddSchichtZumPdf(
-            section,
-            "Frühschicht",
-            frueh);
-
-        // --------------------------------------------------
-        // Spätdienst
-        // --------------------------------------------------
-
-        await AddSchichtZumPdf(
-            section,
-            "Spätdienst",
-            spaet);
-
-        // --------------------------------------------------
-        // Nachtschicht
-        // --------------------------------------------------
-
-        await AddSchichtZumPdf(
-            section,
-            "Nachtschicht",
-            nacht);
-
-        // --------------------------------------------------
-        // Footer
-        // --------------------------------------------------
-
-        var footer =
-            section.Footers.Primary
-                .AddParagraph();
-
-        footer.AddText(
-            $"PSM Pflegebericht - " +
-            $"{datum:dd.MM.yyyy}");
-
-        footer.Format.Font.Size = 8;
-
-        footer.Format.Alignment =
-            ParagraphAlignment.Center;
-
-        // --------------------------------------------------
-        // PDF rendern
-        // --------------------------------------------------
-
-        var renderer =
-            new PdfDocumentRenderer
-            {
-                Document = document
-            };
-
-        renderer.RenderDocument();
-
-        using var stream =
-            new MemoryStream();
-
-        renderer.PdfDocument.Save(
-            stream,
-            false);
-
-        var fileName =
-            $"Pflegebericht_" +
-            $"{bewohner.Vorname}_" +
-            $"{bewohner.Nachname}_" +
-            $"{datum:yyyyMMdd}.pdf";
-
-        return File(
-            stream.ToArray(),
-            "application/pdf",
-            fileName);
-    }
-
-    // --------------------------------------------------
-    // Zugriffsprüfung
-    // --------------------------------------------------
-
-    private async Task<bool> DarfBewohnerSehen(
-        Bewohner bewohner)
-    {
-        var rolle =
-            User.FindFirstValue(ClaimTypes.Role);
-
-        if (rolle == "Administrator")
-        {
-            return true;
-        }
-
-        var benutzerId =
-            User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-        var benutzer = await _context.Users
-            .FirstOrDefaultAsync(
-                u => u.Id == benutzerId);
-
-        if (benutzer == null)
-        {
-            return false;
-        }
-
-        return benutzer.StandortId ==
-               bewohner.StandortId;
-    }
-
-    // --------------------------------------------------
-    // Schicht in PDF schreiben
-    // --------------------------------------------------
-
-    private async Task AddSchichtZumPdf(
-        Section section,
-        string titel,
-        Pflegedokumentation? dokumentation)
-    {
-        var ueberschrift =
-            section.AddParagraph();
-
-        ueberschrift.AddFormattedText(
-            titel,
-            TextFormat.Bold);
-
-        ueberschrift.Format.Font.Size = 14;
-
-        ueberschrift.Format.SpaceBefore =
-            Unit.FromCentimeter(0.4);
-
-        ueberschrift.Format.SpaceAfter =
-            Unit.FromCentimeter(0.2);
-
-        if (dokumentation == null)
-        {
-            var leer =
-                section.AddParagraph(
-                    "Keine Dokumentation vorhanden.");
-
-            leer.Format.Font.Size = 10;
-
-            leer.Format.SpaceAfter =
-                Unit.FromCentimeter(0.6);
-
-            return;
-        }
-
-        var pflegekraft =
-            await _context.Users
-                .FirstOrDefaultAsync(
-                    u => u.Id ==
-                        dokumentation
-                            .ErstelltVonBenutzerId);
-
-        var pflegekraftName =
-            pflegekraft == null
-                ? dokumentation
-                    .ErstelltVonBenutzerId
-                : $"{pflegekraft.Vorname} " +
-                  $"{pflegekraft.Nachname}";
-
-        AddZeile(
-            section,
-            "Pflegefachkraft:",
-            pflegekraftName);
-
-        AddZeile(
-            section,
-            "Erstellt:",
-            dokumentation.ErstelltAm
-                .ToLocalTime()
-                .ToString("dd.MM.yyyy HH:mm"));
-
-        if (dokumentation.GeaendertAm != null)
-        {
-            AddZeile(
-                section,
-                "Zuletzt geändert:",
-                dokumentation.GeaendertAm.Value
-                    .ToLocalTime()
-                    .ToString("dd.MM.yyyy HH:mm"));
-        }
-
-        var bericht =
-            section.AddParagraph(
-                dokumentation.Inhalt);
-
-        bericht.Format.Font.Size = 11;
-
-        bericht.Format.SpaceBefore =
-            Unit.FromCentimeter(0.2);
-
-        bericht.Format.SpaceAfter =
-            Unit.FromCentimeter(0.7);
-    }
-
-    // --------------------------------------------------
-    // PDF Hilfsmethode
-    // --------------------------------------------------
-
-    private static void AddZeile(
-        Section section,
-        string titel,
-        string wert)
-    {
-        var paragraph =
-            section.AddParagraph();
-
-        paragraph.AddFormattedText(
-            titel + " ",
-            TextFormat.Bold);
-
-        paragraph.AddText(wert);
-
-        paragraph.Format.SpaceAfter =
-            Unit.FromCentimeter(0.12);
-    }
-
-    // --------------------------------------------------
-    // Schichtname
+    // Schicht als deutschen Text zurückgeben
     // --------------------------------------------------
 
     private static string SchichtName(
@@ -739,14 +608,46 @@ public class PflegedokumentationController : ControllerBase
             PflegeSchicht.Nachtschicht =>
                 "Nachtschicht",
 
-            _ => "Unbekannt"
+            _ => schicht.ToString()
         };
     }
-}
 
-// --------------------------------------------------
-// Request: Erstellen
-// --------------------------------------------------
+    // --------------------------------------------------
+    // Standort-Zugriff prüfen
+    // --------------------------------------------------
+
+    private async Task<IActionResult?>
+        ZugriffPruefen(
+            int bewohnerStandortId)
+    {
+        var rolle =
+            User.FindFirstValue(
+                ClaimTypes.Role);
+
+        if (rolle == "Administrator")
+        {
+            return null;
+        }
+
+        var benutzerId =
+            User.FindFirstValue(
+                ClaimTypes.NameIdentifier);
+
+        var benutzer =
+            await _context.Users
+                .FirstOrDefaultAsync(
+                    u => u.Id == benutzerId);
+
+        if (benutzer == null ||
+            benutzer.StandortId !=
+            bewohnerStandortId)
+        {
+            return Forbid();
+        }
+
+        return null;
+    }
+}
 
 public class PflegedokumentationErstellenRequest
 {
@@ -761,10 +662,6 @@ public class PflegedokumentationErstellenRequest
 
     public bool MitSpracheErstellt { get; set; }
 }
-
-// --------------------------------------------------
-// Request: Bearbeiten
-// --------------------------------------------------
 
 public class PflegedokumentationBearbeitenRequest
 {

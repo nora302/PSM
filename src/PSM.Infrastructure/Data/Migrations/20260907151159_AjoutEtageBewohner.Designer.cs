@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using PSM.Infrastructure.Data;
@@ -11,9 +12,11 @@ using PSM.Infrastructure.Data;
 namespace PSM.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260907151159_AjoutEtageBewohner")]
+    partial class AjoutEtageBewohner
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -283,9 +286,6 @@ namespace PSM.Infrastructure.Data.Migrations
 
                     b.Property<DateOnly>("Geburtsdatum")
                         .HasColumnType("date");
-
-                    b.Property<bool>("IstArchiviert")
-                        .HasColumnType("boolean");
 
                     b.Property<string>("Nachname")
                         .IsRequired()

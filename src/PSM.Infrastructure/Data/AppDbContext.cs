@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+﻿using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using PSM.Domain.Entities;
 using PSM.Infrastructure.Identity;
@@ -12,44 +12,28 @@ public class AppDbContext : IdentityDbContext<Benutzer>
     {
     }
 
-    public DbSet<Bewohner> Bewohner =>
-        Set<Bewohner>();
+    public DbSet<Bewohner> Bewohner => Set<Bewohner>();
+    public DbSet<Standort> Standorte => Set<Standort>();
+    public DbSet<Pflegedokumentation> Pflegedokumentationen => Set<Pflegedokumentation>();
+    public DbSet<Ernaehrung> Ernaehrungen => Set<Ernaehrung>();
+    public DbSet<Allergie> Allergien => Set<Allergie>();
+    public DbSet<Lebensmittelbestellung> Lebensmittelbestellungen => Set<Lebensmittelbestellung>();
+    public DbSet<Bestellposition> Bestellpositionen => Set<Bestellposition>();
+    public DbSet<LebensmittelArtikel> LebensmittelArtikel => Set<LebensmittelArtikel>();
+    public DbSet<Essensausgabe> Essensausgaben => Set<Essensausgabe>();
+    public DbSet<BewohnerStandortHistorie> BewohnerStandortHistorien => Set<BewohnerStandortHistorie>();
+    public DbSet<Benachrichtigung> Benachrichtigungen => Set<Benachrichtigung>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
-        // --------------------------------------------------
-        // Standort
-        // --------------------------------------------------
-
-        modelBuilder.Entity<Standort>()
-            .HasIndex(s => s.Code)
-            .IsUnique();
-
-        modelBuilder.Entity<Standort>()
-            .Property(s => s.Name)
-            .HasMaxLength(100);
-
-        modelBuilder.Entity<Standort>()
-            .Property(s => s.Code)
-            .HasMaxLength(20);
-
-        modelBuilder.Entity<Standort>()
-            .Property(s => s.Postleitzahl)
-            .HasMaxLength(10);
-
-        modelBuilder.Entity<Standort>()
-            .Property(s => s.Email)
-            .HasMaxLength(200);
-
-        modelBuilder.Entity<Standort>()
-            .Property(s => s.Telefonnummer)
-            .HasMaxLength(50);
-
-        // --------------------------------------------------
-        // Bewohner
-        // --------------------------------------------------
+        modelBuilder.Entity<Standort>().HasIndex(s => s.Code).IsUnique();
+        modelBuilder.Entity<Standort>().Property(s => s.Name).HasMaxLength(100);
+        modelBuilder.Entity<Standort>().Property(s => s.Code).HasMaxLength(20);
+        modelBuilder.Entity<Standort>().Property(s => s.Postleitzahl).HasMaxLength(10);
+        modelBuilder.Entity<Standort>().Property(s => s.Email).HasMaxLength(200);
+        modelBuilder.Entity<Standort>().Property(s => s.Telefonnummer).HasMaxLength(50);
 
         modelBuilder.Entity<Bewohner>()
             .HasOne(b => b.Standort)
@@ -57,39 +41,16 @@ public class AppDbContext : IdentityDbContext<Benutzer>
             .HasForeignKey(b => b.StandortId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        // Bewohnernummer innerhalb eines Standortes eindeutig
         modelBuilder.Entity<Bewohner>()
-            .HasIndex(b => new
-            {
-                b.StandortId,
-                b.StandortBewohnerNummer
-            })
+            .HasIndex(b => new { b.StandortId, b.StandortBewohnerNummer })
             .IsUnique();
 
-        // Suche beschleunigen
         modelBuilder.Entity<Bewohner>()
-            .HasIndex(b => new
-            {
-                b.Nachname,
-                b.Vorname,
-                b.Geburtsdatum
-            });
+            .HasIndex(b => new { b.Nachname, b.Vorname, b.Geburtsdatum });
 
-        modelBuilder.Entity<Bewohner>()
-            .Property(b => b.Vorname)
-            .HasMaxLength(100);
-
-        modelBuilder.Entity<Bewohner>()
-            .Property(b => b.Nachname)
-            .HasMaxLength(100);
-
-        modelBuilder.Entity<Bewohner>()
-            .Property(b => b.Zimmernummer)
-            .HasMaxLength(30);
-
-        // --------------------------------------------------
-        // BewohnerStandortHistorie
-        // --------------------------------------------------
+        modelBuilder.Entity<Bewohner>().Property(b => b.Vorname).HasMaxLength(100);
+        modelBuilder.Entity<Bewohner>().Property(b => b.Nachname).HasMaxLength(100);
+        modelBuilder.Entity<Bewohner>().Property(b => b.Zimmernummer).HasMaxLength(30);
 
         modelBuilder.Entity<BewohnerStandortHistorie>()
             .HasOne(h => h.Bewohner)
@@ -98,23 +59,10 @@ public class AppDbContext : IdentityDbContext<Benutzer>
             .OnDelete(DeleteBehavior.Restrict);
 
         modelBuilder.Entity<BewohnerStandortHistorie>()
-            .HasIndex(h => new
-            {
-                h.BewohnerId,
-                h.GeaendertAm
-            });
+            .HasIndex(h => new { h.BewohnerId, h.GeaendertAm });
 
-        modelBuilder.Entity<BewohnerStandortHistorie>()
-            .Property(h => h.AlteZimmernummer)
-            .HasMaxLength(30);
-
-        modelBuilder.Entity<BewohnerStandortHistorie>()
-            .Property(h => h.NeueZimmernummer)
-            .HasMaxLength(30);
-
-        // --------------------------------------------------
-        // Pflegedokumentation
-        // --------------------------------------------------
+        modelBuilder.Entity<BewohnerStandortHistorie>().Property(h => h.AlteZimmernummer).HasMaxLength(30);
+        modelBuilder.Entity<BewohnerStandortHistorie>().Property(h => h.NeueZimmernummer).HasMaxLength(30);
 
         modelBuilder.Entity<Pflegedokumentation>()
             .HasOne(p => p.Bewohner)
@@ -122,28 +70,12 @@ public class AppDbContext : IdentityDbContext<Benutzer>
             .HasForeignKey(p => p.BewohnerId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        // Pro Bewohner + Datum + Schicht
-        // darf nur eine Dokumentation existieren
         modelBuilder.Entity<Pflegedokumentation>()
-            .HasIndex(p => new
-            {
-                p.BewohnerId,
-                p.Datum,
-                p.Schicht
-            })
+            .HasIndex(p => new { p.BewohnerId, p.Datum, p.Schicht })
             .IsUnique();
 
-        // Recherche des rapports d'un Bewohner par date
         modelBuilder.Entity<Pflegedokumentation>()
-            .HasIndex(p => new
-            {
-                p.BewohnerId,
-                p.Datum
-            });
-
-        // --------------------------------------------------
-        // Ernährung
-        // --------------------------------------------------
+            .HasIndex(p => new { p.BewohnerId, p.Datum });
 
         modelBuilder.Entity<Ernaehrung>()
             .HasOne(e => e.Bewohner)
@@ -151,9 +83,9 @@ public class AppDbContext : IdentityDbContext<Benutzer>
             .HasForeignKey<Ernaehrung>(e => e.BewohnerId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // --------------------------------------------------
-        // Allergie
-        // --------------------------------------------------
+        modelBuilder.Entity<Ernaehrung>()
+            .Property(e => e.Krankheit)
+            .HasMaxLength(500);
 
         modelBuilder.Entity<Allergie>()
             .HasOne(a => a.Bewohner)
@@ -161,13 +93,7 @@ public class AppDbContext : IdentityDbContext<Benutzer>
             .HasForeignKey(a => a.BewohnerId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        modelBuilder.Entity<Allergie>()
-            .Property(a => a.Name)
-            .HasMaxLength(150);
-
-        // --------------------------------------------------
-        // Lebensmittelbestellung
-        // --------------------------------------------------
+        modelBuilder.Entity<Allergie>().Property(a => a.Name).HasMaxLength(150);
 
         modelBuilder.Entity<Lebensmittelbestellung>()
             .HasOne(b => b.Standort)
@@ -176,19 +102,14 @@ public class AppDbContext : IdentityDbContext<Benutzer>
             .OnDelete(DeleteBehavior.Restrict);
 
         modelBuilder.Entity<Lebensmittelbestellung>()
-            .HasIndex(b => new
-            {
-                b.StandortId,
-                b.Lieferdatum
-            });
+            .HasIndex(b => new { b.StandortId, b.Lieferdatum });
 
         modelBuilder.Entity<Lebensmittelbestellung>()
-            .Property(b => b.Status)
-            .HasMaxLength(50);
+            .HasIndex(b => b.Bestellnummer)
+            .IsUnique();
 
-        // --------------------------------------------------
-        // Bestellposition
-        // --------------------------------------------------
+        modelBuilder.Entity<Lebensmittelbestellung>().Property(b => b.Status).HasMaxLength(50);
+        modelBuilder.Entity<Lebensmittelbestellung>().Property(b => b.Bestellnummer).HasMaxLength(50);
 
         modelBuilder.Entity<Bestellposition>()
             .HasOne(p => p.Lebensmittelbestellung)
@@ -196,17 +117,15 @@ public class AppDbContext : IdentityDbContext<Benutzer>
             .HasForeignKey(p => p.LebensmittelbestellungId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        modelBuilder.Entity<Bestellposition>()
-            .Property(p => p.Lebensmittelname)
+        modelBuilder.Entity<Bestellposition>().Property(p => p.Lebensmittelname).HasMaxLength(200);
+        modelBuilder.Entity<Bestellposition>().Property(p => p.Einheit).HasMaxLength(50);
+
+        modelBuilder.Entity<LebensmittelArtikel>()
+            .Property(a => a.Name)
             .HasMaxLength(200);
 
-        modelBuilder.Entity<Bestellposition>()
-            .Property(p => p.Einheit)
-            .HasMaxLength(50);
-
-        // --------------------------------------------------
-        // Essensausgabe
-        // --------------------------------------------------
+        modelBuilder.Entity<LebensmittelArtikel>()
+            .HasIndex(a => a.Name);
 
         modelBuilder.Entity<Essensausgabe>()
             .HasOne(e => e.Bewohner)
@@ -215,21 +134,23 @@ public class AppDbContext : IdentityDbContext<Benutzer>
             .OnDelete(DeleteBehavior.Restrict);
 
         modelBuilder.Entity<Essensausgabe>()
-            .HasIndex(e => new
-            {
-                e.BewohnerId,
-                e.Datum,
-                e.Mahlzeit
-            })
+            .HasIndex(e => new { e.BewohnerId, e.Datum, e.Mahlzeit })
             .IsUnique();
 
-        modelBuilder.Entity<Essensausgabe>()
-            .Property(e => e.Mahlzeit)
-            .HasMaxLength(50);
+        modelBuilder.Entity<Essensausgabe>().Property(e => e.Mahlzeit).HasMaxLength(50);
 
-        // --------------------------------------------------
-        // Benutzer
-        // --------------------------------------------------
+        modelBuilder.Entity<Benachrichtigung>()
+            .HasOne(n => n.Standort)
+            .WithMany()
+            .HasForeignKey(n => n.StandortId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<Benachrichtigung>()
+            .HasIndex(n => new { n.EmpfaengerRolle, n.Gelesen });
+
+        modelBuilder.Entity<Benachrichtigung>().Property(n => n.Typ).HasMaxLength(50);
+        modelBuilder.Entity<Benachrichtigung>().Property(n => n.EmpfaengerRolle).HasMaxLength(50);
+        modelBuilder.Entity<Benachrichtigung>().Property(n => n.Nachricht).HasMaxLength(500);
 
         modelBuilder.Entity<Benutzer>()
             .HasOne(b => b.Standort)
@@ -237,12 +158,7 @@ public class AppDbContext : IdentityDbContext<Benutzer>
             .HasForeignKey(b => b.StandortId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        modelBuilder.Entity<Benutzer>()
-            .Property(b => b.Vorname)
-            .HasMaxLength(100);
-
-        modelBuilder.Entity<Benutzer>()
-            .Property(b => b.Nachname)
-            .HasMaxLength(100);
+        modelBuilder.Entity<Benutzer>().Property(b => b.Vorname).HasMaxLength(100);
+        modelBuilder.Entity<Benutzer>().Property(b => b.Nachname).HasMaxLength(100);
     }
 }

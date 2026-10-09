@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PSM.Domain.Entities;
@@ -27,33 +27,26 @@ public class BestellpositionController : ControllerBase
 
         if (bestellung == null)
         {
-            return NotFound(new
-            {
-                message = "Lebensmittelbestellung wurde nicht gefunden."
-            });
+            return NotFound(new { message = "Lebensmittelbestellung wurde nicht gefunden." });
         }
 
         var rolle = User.FindFirstValue(ClaimTypes.Role);
 
-        if (rolle != "Administrator" &&
-            rolle != "Kuechenmitarbeiter")
+        if (rolle != "Administrator" && rolle != "Kuechenmitarbeiter")
         {
-            var benutzerId =
-                User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var benutzerId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
             var benutzer = await _context.Users
                 .FirstOrDefaultAsync(u => u.Id == benutzerId);
 
-            if (benutzer == null ||
-                benutzer.StandortId != bestellung.StandortId)
+            if (benutzer == null || benutzer.StandortId != bestellung.StandortId)
             {
                 return Forbid();
             }
         }
 
         var positionen = await _context.Bestellpositionen
-            .Where(p =>
-                p.LebensmittelbestellungId == bestellungId)
+            .Where(p => p.LebensmittelbestellungId == bestellungId)
             .OrderBy(p => p.Lebensmittelname)
             .ToListAsync();
 
@@ -61,12 +54,11 @@ public class BestellpositionController : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "Hauswirtschaftskraft")]
-    public async Task<IActionResult> Erstellen(
-        BestellpositionErstellenRequest request)
+    [Authorize(Roles = "Administrator,Hauswirtschaftskraft")]
+    public async Task<IActionResult> Erstellen(BestellpositionErstellenRequest request)
     {
-        var benutzerId =
-            User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var rolle = User.FindFirstValue(ClaimTypes.Role);
+        var benutzerId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
         var benutzer = await _context.Users
             .FirstOrDefaultAsync(u => u.Id == benutzerId);
@@ -76,48 +68,34 @@ public class BestellpositionController : ControllerBase
             return Unauthorized();
         }
 
-        var bestellung =
-            await _context.Lebensmittelbestellungen
-                .FirstOrDefaultAsync(
-                    b => b.Id == request.LebensmittelbestellungId);
+        var bestellung = await _context.Lebensmittelbestellungen
+            .FirstOrDefaultAsync(b => b.Id == request.LebensmittelbestellungId);
 
         if (bestellung == null)
         {
-            return NotFound(new
-            {
-                message = "Lebensmittelbestellung wurde nicht gefunden."
-            });
+            return NotFound(new { message = "Lebensmittelbestellung wurde nicht gefunden." });
         }
 
-        if (benutzer.StandortId != bestellung.StandortId)
+        if (rolle != "Administrator" && benutzer.StandortId != bestellung.StandortId)
         {
             return Forbid();
         }
 
         if (bestellung.Status != "Entwurf")
         {
-            return BadRequest(new
-            {
-                message =
-                    "Bestellpositionen können nur bei Bestellungen im Status Entwurf hinzugefügt werden."
-            });
+            return BadRequest(new { message = "Bestellpositionen können nur bei Bestellungen im Status Entwurf hinzugefügt werden." });
         }
 
         if (request.Menge <= 0)
         {
-            return BadRequest(new
-            {
-                message = "Die Menge muss größer als 0 sein."
-            });
+            return BadRequest(new { message = "Die Menge muss größer als 0 sein." });
         }
 
         var position = new Bestellposition
         {
             Id = Guid.NewGuid(),
-            LebensmittelbestellungId =
-                request.LebensmittelbestellungId,
-            Lebensmittelname =
-                request.Lebensmittelname,
+            LebensmittelbestellungId = request.LebensmittelbestellungId,
+            Lebensmittelname = request.Lebensmittelname,
             Menge = request.Menge,
             Einheit = request.Einheit,
             Bemerkung = request.Bemerkung
@@ -131,13 +109,11 @@ public class BestellpositionController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = "Hauswirtschaftskraft")]
-    public async Task<IActionResult> Bearbeiten(
-        Guid id,
-        BestellpositionBearbeitenRequest request)
+    [Authorize(Roles = "Administrator,Hauswirtschaftskraft")]
+    public async Task<IActionResult> Bearbeiten(Guid id, BestellpositionBearbeitenRequest request)
     {
-        var benutzerId =
-            User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var rolle = User.FindFirstValue(ClaimTypes.Role);
+        var benutzerId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
         var benutzer = await _context.Users
             .FirstOrDefaultAsync(u => u.Id == benutzerId);
@@ -153,46 +129,59 @@ public class BestellpositionController : ControllerBase
 
         if (position == null)
         {
-            return NotFound(new
-            {
-                message = "Bestellposition wurde nicht gefunden."
-            });
+            return NotFound(new { message = "Bestellposition wurde nicht gefunden." });
         }
 
-        if (benutzer.StandortId !=
-            position.Lebensmittelbestellung.StandortId)
+        if (rolle != "Administrator" && benutzer.StandortId != position.Lebensmittelbestellung.StandortId)
         {
             return Forbid();
         }
 
         if (position.Lebensmittelbestellung.Status != "Entwurf")
         {
-            return BadRequest(new
-            {
-                message =
-                    "Bestellpositionen können nur bei Bestellungen im Status Entwurf geändert werden."
-            });
+            return BadRequest(new { message = "Bestellpositionen können nur bei Bestellungen im Status Entwurf geändert werden." });
         }
 
         if (request.Menge <= 0)
         {
-            return BadRequest(new
-            {
-                message = "Die Menge muss größer als 0 sein."
-            });
+            return BadRequest(new { message = "Die Menge muss größer als 0 sein." });
         }
 
-        position.Lebensmittelname =
-            request.Lebensmittelname;
+        position.Lebensmittelname = request.Lebensmittelname;
+        position.Menge = request.Menge;
+        position.Einheit = request.Einheit;
+        position.Bemerkung = request.Bemerkung;
 
-        position.Menge =
-            request.Menge;
+        await _context.SaveChangesAsync();
 
-        position.Einheit =
-            request.Einheit;
+        return Ok(position);
+    }
 
-        position.Bemerkung =
-            request.Bemerkung;
+    [HttpPut("{id:guid}/lieferung")]
+    [Authorize(Roles = "Kuechenmitarbeiter")]
+    public async Task<IActionResult> LieferungEintragen(Guid id, BestellpositionLieferungRequest request)
+    {
+        var position = await _context.Bestellpositionen
+            .Include(p => p.Lebensmittelbestellung)
+            .FirstOrDefaultAsync(p => p.Id == id);
+
+        if (position == null)
+        {
+            return NotFound(new { message = "Bestellposition wurde nicht gefunden." });
+        }
+
+        if (position.Lebensmittelbestellung.Status != "Gesendet" && position.Lebensmittelbestellung.Status != "InBearbeitung")
+        {
+            return BadRequest(new { message = "Die gelieferte Menge kann nur bei gesendeten oder in Bearbeitung befindlichen Bestellungen eingetragen werden." });
+        }
+
+        if (request.GelieferteMenge < 0)
+        {
+            return BadRequest(new { message = "Die gelieferte Menge darf nicht negativ sein." });
+        }
+
+        position.GelieferteMenge = request.GelieferteMenge;
+        position.Bemerkung = request.Bemerkung;
 
         await _context.SaveChangesAsync();
 
@@ -200,11 +189,11 @@ public class BestellpositionController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = "Hauswirtschaftskraft")]
+    [Authorize(Roles = "Administrator,Hauswirtschaftskraft")]
     public async Task<IActionResult> Loeschen(Guid id)
     {
-        var benutzerId =
-            User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var rolle = User.FindFirstValue(ClaimTypes.Role);
+        var benutzerId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
         var benutzer = await _context.Users
             .FirstOrDefaultAsync(u => u.Id == benutzerId);
@@ -220,64 +209,46 @@ public class BestellpositionController : ControllerBase
 
         if (position == null)
         {
-            return NotFound(new
-            {
-                message = "Bestellposition wurde nicht gefunden."
-            });
+            return NotFound(new { message = "Bestellposition wurde nicht gefunden." });
         }
 
-        if (benutzer.StandortId !=
-            position.Lebensmittelbestellung.StandortId)
+        if (rolle != "Administrator" && benutzer.StandortId != position.Lebensmittelbestellung.StandortId)
         {
             return Forbid();
         }
 
         if (position.Lebensmittelbestellung.Status != "Entwurf")
         {
-            return BadRequest(new
-            {
-                message =
-                    "Bestellpositionen können nur bei Bestellungen im Status Entwurf gelöscht werden."
-            });
+            return BadRequest(new { message = "Bestellpositionen können nur bei Bestellungen im Status Entwurf gelöscht werden." });
         }
 
         _context.Bestellpositionen.Remove(position);
 
         await _context.SaveChangesAsync();
 
-        return Ok(new
-        {
-            message = "Bestellposition wurde gelöscht."
-        });
+        return Ok(new { message = "Bestellposition wurde gelöscht." });
     }
 }
 
 public class BestellpositionErstellenRequest
 {
     public Guid LebensmittelbestellungId { get; set; }
-
-    public string Lebensmittelname { get; set; } =
-        string.Empty;
-
+    public string Lebensmittelname { get; set; } = string.Empty;
     public decimal Menge { get; set; }
-
-    public string Einheit { get; set; } =
-        string.Empty;
-
-    public string Bemerkung { get; set; } =
-        string.Empty;
+    public string Einheit { get; set; } = string.Empty;
+    public string Bemerkung { get; set; } = string.Empty;
 }
 
 public class BestellpositionBearbeitenRequest
 {
-    public string Lebensmittelname { get; set; } =
-        string.Empty;
-
+    public string Lebensmittelname { get; set; } = string.Empty;
     public decimal Menge { get; set; }
+    public string Einheit { get; set; } = string.Empty;
+    public string Bemerkung { get; set; } = string.Empty;
+}
 
-    public string Einheit { get; set; } =
-        string.Empty;
-
-    public string Bemerkung { get; set; } =
-        string.Empty;
+public class BestellpositionLieferungRequest
+{
+    public decimal GelieferteMenge { get; set; }
+    public string Bemerkung { get; set; } = string.Empty;
 }

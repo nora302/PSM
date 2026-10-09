@@ -20,38 +20,25 @@ public class AllergieController : ControllerBase
     }
 
     [HttpGet("bewohner/{bewohnerId:guid}")]
-    public async Task<IActionResult> AlleVonBewohner(Guid bewohnerId)
+    public async Task<IActionResult> NachBewohner(Guid bewohnerId)
     {
         var bewohner = await _context.Bewohner
             .FirstOrDefaultAsync(b => b.Id == bewohnerId);
 
         if (bewohner == null)
         {
-            return NotFound(new
-            {
-                message = "Bewohner wurde nicht gefunden."
-            });
+            return NotFound(new { message = "Bewohner wurde nicht gefunden." });
         }
 
-        var rolle = User.FindFirstValue(ClaimTypes.Role);
+        var zugriffsFehler = await ZugriffPruefen(bewohner.StandortId);
 
-        if (rolle != "Administrator")
+        if (zugriffsFehler != null)
         {
-            var benutzerId =
-                User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-            var benutzer = await _context.Users
-                .FirstOrDefaultAsync(u => u.Id == benutzerId);
-
-            if (benutzer == null ||
-                benutzer.StandortId != bewohner.StandortId)
-            {
-                return Forbid();
-            }
+            return zugriffsFehler;
         }
 
         var allergien = await _context.Allergien
-            .Where(a => a.BewohnerId == bewohnerId)
+            .Where(a => a.BewohnerId == bewohnerId && a.IstAktiv)
             .OrderBy(a => a.Name)
             .ToListAsync();
 
@@ -59,42 +46,34 @@ public class AllergieController : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "Pflegekraft")]
-    public async Task<IActionResult> Erstellen(
-        AllergieRequest request)
+    [Authorize(Roles = "Administrator,Pflegekraft")]
+    public async Task<IActionResult> Erstellen(AllergieErstellenRequest request)
     {
-        var benutzerId =
-            User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-        var benutzer = await _context.Users
-            .FirstOrDefaultAsync(u => u.Id == benutzerId);
-
-        if (benutzer == null)
-        {
-            return Unauthorized();
-        }
-
         var bewohner = await _context.Bewohner
             .FirstOrDefaultAsync(b => b.Id == request.BewohnerId);
 
         if (bewohner == null)
         {
-            return NotFound(new
-            {
-                message = "Bewohner wurde nicht gefunden."
-            });
+            return NotFound(new { message = "Bewohner wurde nicht gefunden." });
         }
 
-        if (benutzer.StandortId != bewohner.StandortId)
+        var zugriffsFehler = await ZugriffPruefen(bewohner.StandortId);
+
+        if (zugriffsFehler != null)
         {
-            return Forbid();
+            return zugriffsFehler;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return BadRequest(new { message = "Bitte einen Namen angeben." });
         }
 
         var allergie = new Allergie
         {
             Id = Guid.NewGuid(),
             BewohnerId = request.BewohnerId,
-            Name = request.Name,
+            Name = request.Name.Trim(),
             Bemerkung = request.Bemerkung,
             IstAktiv = true,
             ErstelltAm = DateTime.UtcNow
@@ -108,64 +87,99 @@ public class AllergieController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = "Pflegekraft")]
-    public async Task<IActionResult> Bearbeiten(
-        Guid id,
-        AllergieBearbeitenRequest request)
+    [Authorize(Roles = "Administrator,Pflegekraft")]
+    public async Task<IActionResult> Bearbeiten(Guid id, AllergieBearbeitenRequest request)
     {
-        var benutzerId =
-            User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-        var benutzer = await _context.Users
-            .FirstOrDefaultAsync(u => u.Id == benutzerId);
-
-        if (benutzer == null)
-        {
-            return Unauthorized();
-        }
-
         var allergie = await _context.Allergien
             .Include(a => a.Bewohner)
             .FirstOrDefaultAsync(a => a.Id == id);
 
         if (allergie == null)
         {
-            return NotFound(new
-            {
-                message = "Allergie wurde nicht gefunden."
-            });
+            return NotFound(new { message = "Allergie wurde nicht gefunden." });
         }
 
-        if (benutzer.StandortId != allergie.Bewohner.StandortId)
+        var zugriffsFehler = await ZugriffPruefen(allergie.Bewohner.StandortId);
+
+        if (zugriffsFehler != null)
         {
-            return Forbid();
+            return zugriffsFehler;
         }
 
-        allergie.Name = request.Name;
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return BadRequest(new { message = "Bitte einen Namen angeben." });
+        }
+
+        allergie.Name = request.Name.Trim();
         allergie.Bemerkung = request.Bemerkung;
-        allergie.IstAktiv = request.IstAktiv;
         allergie.GeaendertAm = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
 
         return Ok(allergie);
     }
+
+    [HttpPost("{id:guid}/deaktivieren")]
+    [Authorize(Roles = "Administrator,Pflegekraft")]
+    public async Task<IActionResult> Deaktivieren(Guid id)
+    {
+        var allergie = await _context.Allergien
+            .Include(a => a.Bewohner)
+            .FirstOrDefaultAsync(a => a.Id == id);
+
+        if (allergie == null)
+        {
+            return NotFound(new { message = "Allergie wurde nicht gefunden." });
+        }
+
+        var zugriffsFehler = await ZugriffPruefen(allergie.Bewohner.StandortId);
+
+        if (zugriffsFehler != null)
+        {
+            return zugriffsFehler;
+        }
+
+        allergie.IstAktiv = false;
+        allergie.GeaendertAm = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+
+        return Ok(new { message = "Allergie wurde deaktiviert." });
+    }
+
+    private async Task<IActionResult?> ZugriffPruefen(int bewohnerStandortId)
+    {
+        var rolle = User.FindFirstValue(ClaimTypes.Role);
+
+        if (rolle == "Administrator")
+        {
+            return null;
+        }
+
+        var benutzerId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        var benutzer = await _context.Users
+            .FirstOrDefaultAsync(u => u.Id == benutzerId);
+
+        if (benutzer == null || benutzer.StandortId != bewohnerStandortId)
+        {
+            return Forbid();
+        }
+
+        return null;
+    }
 }
 
-public class AllergieRequest
+public class AllergieErstellenRequest
 {
     public Guid BewohnerId { get; set; }
-
     public string Name { get; set; } = string.Empty;
-
     public string Bemerkung { get; set; } = string.Empty;
 }
 
 public class AllergieBearbeitenRequest
 {
     public string Name { get; set; } = string.Empty;
-
     public string Bemerkung { get; set; } = string.Empty;
-
-    public bool IstAktiv { get; set; }
 }

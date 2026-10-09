@@ -193,6 +193,14 @@ public class BenutzerController : ControllerBase
             });
         }
 
+        if (benutzer.UserName == "admin")
+        {
+            return BadRequest(new
+            {
+                message = "Der Benutzer 'admin' kann hier nicht bearbeitet werden."
+            });
+        }
+
         if (!await _roleManager.RoleExistsAsync(request.Rolle))
         {
             return BadRequest(new
@@ -223,6 +231,29 @@ public class BenutzerController : ControllerBase
         if (request.Rolle == "Kuechenmitarbeiter")
         {
             request.StandortId = null;
+        }
+
+        if (!string.Equals(benutzer.UserName, request.Benutzername, StringComparison.OrdinalIgnoreCase))
+        {
+            var vorhanden = await _userManager.FindByNameAsync(request.Benutzername);
+
+            if (vorhanden != null)
+            {
+                return BadRequest(new
+                {
+                    message = "Dieser Benutzername ist bereits vergeben."
+                });
+            }
+
+            var nameResult = await _userManager.SetUserNameAsync(benutzer, request.Benutzername);
+
+            if (!nameResult.Succeeded)
+            {
+                return BadRequest(new
+                {
+                    errors = nameResult.Errors.Select(e => e.Description)
+                });
+            }
         }
 
         benutzer.Vorname = request.Vorname;
@@ -304,7 +335,7 @@ public class BenutzerController : ControllerBase
             });
         }
 
-        if (benutzer.UserName == "H.Aidouni")
+        if (benutzer.UserName == "admin")
         {
             return BadRequest(new
             {
@@ -366,6 +397,86 @@ public class BenutzerController : ControllerBase
         });
     }
 
+    [HttpDelete("{id}")]
+    public async Task<IActionResult> Loeschen(string id)
+    {
+        var benutzer = await _userManager.FindByIdAsync(id);
+
+        if (benutzer == null)
+        {
+            return NotFound(new
+            {
+                message = "Benutzer wurde nicht gefunden."
+            });
+        }
+
+        if (benutzer.UserName == "admin")
+        {
+            return BadRequest(new
+            {
+                message = "Der initiale Administrator kann nicht gelöscht werden."
+            });
+        }
+
+        var hatDaten = await HatVerknuepfteDaten(id);
+
+        if (hatDaten)
+        {
+            return BadRequest(new
+            {
+                message =
+                    "Dieser Benutzer hat bereits Daten erstellt und kann nicht " +
+                    "gelöscht werden. Bitte deaktivieren Sie den Benutzer stattdessen."
+            });
+        }
+
+        var result = await _userManager.DeleteAsync(benutzer);
+
+        if (!result.Succeeded)
+        {
+            return BadRequest(new
+            {
+                errors = result.Errors.Select(e => e.Description)
+            });
+        }
+
+        return Ok(new
+        {
+            message = "Benutzer wurde endgültig gelöscht."
+        });
+    }
+
+    private async Task<bool> HatVerknuepfteDaten(string benutzerId)
+    {
+        var hatPflegedokumentation = await _context.Pflegedokumentationen
+            .AnyAsync(p =>
+                p.ErstelltVonBenutzerId == benutzerId ||
+                p.GeaendertVonBenutzerId == benutzerId);
+
+        if (hatPflegedokumentation) return true;
+
+        var hatEssensausgabe = await _context.Essensausgaben
+            .AnyAsync(e => e.ErledigtVonBenutzerId == benutzerId);
+
+        if (hatEssensausgabe) return true;
+
+        var hatBestellung = await _context.Lebensmittelbestellungen
+            .AnyAsync(b =>
+                b.ErstelltVonBenutzerId == benutzerId ||
+                b.GesendetVonBenutzerId == benutzerId ||
+                b.BearbeitungGestartetVonBenutzerId == benutzerId ||
+                b.ErledigtVonBenutzerId == benutzerId);
+
+        if (hatBestellung) return true;
+
+        var hatHistorie = await _context.BewohnerStandortHistorien
+            .AnyAsync(h => h.GeaendertVonBenutzerId == benutzerId);
+
+        if (hatHistorie) return true;
+
+        return false;
+    }
+
     private async Task<IActionResult?> StandortUndRollePruefen(
         string rolle,
         int? standortId)
@@ -420,6 +531,8 @@ public class BenutzerErstellenRequest
 
 public class BenutzerBearbeitenRequest
 {
+    public string Benutzername { get; set; } = string.Empty;
+
     public string Vorname { get; set; } = string.Empty;
 
     public string Nachname { get; set; } = string.Empty;
