@@ -245,11 +245,8 @@ using (var scope = app.Services.CreateScope())
 // Swagger
 // --------------------------------------------------
 
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+app.UseSwagger();
+app.UseSwaggerUI();
 
 // --------------------------------------------------
 // HTTP Pipeline
